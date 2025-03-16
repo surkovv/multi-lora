@@ -15,7 +15,7 @@ class ModuleSum(nn.Module):
 
 
 class LoRAModel(nn.Module):
-    def __init__(self, base_model, lora_config):
+    def __init__(self, base_model, target_modules, lora_factory):
         """
         Wraps a given LLM model and injects LoRA layers into specified layers.
 
@@ -25,8 +25,9 @@ class LoRAModel(nn.Module):
         """
         super().__init__()
         self.base_model = base_model
-        self.lora_config = lora_config
+        self.target_modules = target_modules
         self.adapter_ids = torch.tensor([], dtype=torch.long).to('cuda')
+        self.lora_factory = lora_factory
 
         self._inject_lora_layers()
 
@@ -44,9 +45,7 @@ class LoRAModel(nn.Module):
         """
         Injects LoRA layers into the specified layers of the model.
         """
-        target_modules = self.lora_config.get("target_modules", [])
-        rank = self.lora_config.get("rank", 8)
-        alpha = self.lora_config.get("alpha", 1.0)
+        target_modules = self.target_modules
 
         modules_to_replace = {}
 
@@ -56,9 +55,8 @@ class LoRAModel(nn.Module):
                 # Wrap the original linear layer
                 wrapped_layer = ModuleSum(
                     module,  # Original layer
-                    MultiLoRALayerMaskingHomEfficient(in_features, out_features, self.adapter_ids, rank, alpha),
+                    self.lora_factory(in_features, out_features, self.adapter_ids),
                 )
-                print(name)
                 modules_to_replace[name] = wrapped_layer
             
         for name, new_module in modules_to_replace.items():

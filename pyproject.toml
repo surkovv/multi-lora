@@ -12,5 +12,7 @@ dependencies = ["torch", "transformers"]
 readme = "README.md"
 
 [tool.setuptools]
-package-dir = {"" = "src"}
-packages = ["multilora"]
+packages = "find:"
+
+[tool.setuptools.package-dir]
+multilora = "src/multilora"
