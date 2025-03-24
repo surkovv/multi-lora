@@ -1,6 +1,10 @@
+import stk.backend
+import stk.backend.sputnik
 import torch
 import torch.nn as nn
+import numpy as np
 from typing import List
+import stk
 
 class LoRALayer(nn.Module):
     def __init__(self):
@@ -101,4 +105,66 @@ class MultiLoRALayerMasking(LoRALayer):
 
         return result
 
+class MultiLoRALayerSTK(LoRALayer):
+    def __init__(self, in_features, out_features, adapter_ids, ranks: List[int], alpha=1.0, dropout=0.0):
+        """
+        
+        """
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.ranks = ranks
+        self.R = sum(ranks)
+        self.scalings = alpha / torch.tensor(ranks, dtype=torch.bfloat16).to('cuda')
+        self.dropout = nn.Dropout(p=dropout)
+        self.BLOCKS_SIZE = 16
+        assert all(rank % self.BLOCKS_SIZE == 0 for rank in ranks)
+        self.cumr = np.concat(([0], np.cumsum(ranks)))
+
+        self.A = nn.Parameter(torch.randn(self.R, out_features, device="cuda", dtype=torch.bfloat16) * 0.02)  # Small random init
+        self.B = nn.Parameter(torch.zeros(in_features, self.R, device="cuda", dtype=torch.bfloat16))
+
+        self.adapter_ids = adapter_ids
+
+    def forward(self, x):
+        init_shape = x.shape
+        B, S, H = init_shape
+        assert S % self.BLOCKS_SIZE == 0
+        assert H % self.BLOCKS_SIZE == 0
+        
+        # GENERATE MASK MATRIX
+        local_ids = self.adapter_ids.to('cpu').kron(
+            torch.ones((S // self.BLOCKS_SIZE), dtype=int)
+        )
+        labels = []
+        for id in local_ids.numpy():
+            labels.append(list(range(self.cumr[id] // self.BLOCKS_SIZE, self.cumr[id + 1] // self.BLOCKS_SIZE)))
+
+        column_indices = sum(labels, [])
+        row_indices = []
+        offsets = [0]
+        for i, lb in enumerate(labels):
+            for l in lb:
+                row_indices.append(i)
+            offsets.append(len(row_indices))
+
+        column_indices = torch.tensor(column_indices).to('cuda', dtype=torch.int16)
+        row_indices = torch.tensor(row_indices).to('cuda', dtype=torch.int16)
+        offsets = torch.tensor(offsets).to('cuda', dtype=torch.int32)
+
+        topo = stk.Matrix(
+            size=(B * S, self.R), 
+            data=torch.ones((len(column_indices), self.BLOCKS_SIZE, self.BLOCKS_SIZE), dtype=torch.float16, device="cuda"),
+            row_indices=row_indices,
+            column_indices=column_indices,
+            offsets=offsets
+        )
+        topo.validate()
+
+        # Perform calculations
+        x_prime = x.view(-1, x.shape[2])
+        Bx = stk.ops.sdd(x_prime, self.B, topo)
+        result = stk.ops.dsd(Bx, self.A)
+
+        return result.view((B, S, self.out_features)) * self.scalings[self.adapter_ids.to('cpu')].view(-1, 1, 1)
 
