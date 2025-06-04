@@ -11,7 +11,7 @@ def get_finetome_dataset(n_examples, tokenizer):
     def tokenize(examples):
         messages = examples["conversations"]
         text = [str(message) for message in messages]
-        return tokenizer(text, padding=True, pad_to_multiple_of=16, truncation=True)
+        return tokenizer(text, padding=True, pad_to_multiple_of=16, truncation=True, max_length=512)
     
     return dataset.map(tokenize, batched=True)
 
@@ -23,7 +23,7 @@ def get_bitext_dataset(n_examples, tokenizer):
         def apply_template(example):
             return f"Q: {example[0]}\nA: {example[1]}"
         text = [apply_template(example) for example in zip(examples['instruction'], examples['response'])]
-        return tokenizer(text, padding=True, pad_to_multiple_of=16, truncation=True)
+        return tokenizer(text, padding=True, pad_to_multiple_of=16, truncation=True, max_length=512)
     
     return dataset.map(tokenize, batched=True)
 
@@ -32,8 +32,16 @@ def get_guanaco_dataset(n_examples, tokenizer):
     dataset = load_dataset("mlabonne/guanaco-llama2-1k", split='train[:{}]'.format(n_examples))
 
     def tokenize(examples):
-       return tokenizer(examples["text"], padding=True, pad_to_multiple_of=16, truncation=True)
+       return tokenizer(examples["text"], padding=True, pad_to_multiple_of=16, truncation=True, max_length=512)
     
+    return dataset.map(tokenize, batched=True)
+
+def get_acp_dataset(n_examples, tokenizer):
+    dataset = load_dataset("fka/awesome-chatgpt-prompts", split='train[:{}]'.format(n_examples))
+
+    def tokenize(examples):
+       return tokenizer(examples["prompt"], padding=True, pad_to_multiple_of=16, truncation=True, max_length=512)
+
     return dataset.map(tokenize, batched=True)
 
 

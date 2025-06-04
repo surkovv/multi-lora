@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
 import transformers
+import types
+import os
+from peft import get_peft_model, LoraConfig, PeftModel
 
 from multilora import LoRALayer, MultiLoRALayerMaskingHom, MultiLoRALayerMaskingHomEfficient
 
@@ -90,3 +93,22 @@ class LoRAModel(nn.Module):
     def forward(self, *args, adapter_ids, **kwargs):
         self.adapter_ids.data = adapter_ids
         return self.base_model(*args, **kwargs)
+    
+    def generate(self, *args, adapter_ids=None, **kwargs):
+        if adapter_ids is None:
+            raise ValueError("`adapter_ids` must be provided for generation.")
+
+        self.adapter_ids.data = adapter_ids
+
+        original_forward = self.base_model.forward
+
+        def patched_forward(model_self, *f_args, **f_kwargs):
+            self.adapter_ids.data = adapter_ids
+            return original_forward(*f_args, **f_kwargs)
+
+        self.base_model.forward = types.MethodType(patched_forward, self.base_model)
+
+        try:
+            return self.base_model.generate(*args, **kwargs)
+        finally:
+            self.base_model.forward = original_forward

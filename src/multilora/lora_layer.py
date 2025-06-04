@@ -129,9 +129,16 @@ class MultiLoRALayerSTK(LoRALayer):
     def forward(self, x):
         init_shape = x.shape
         B, S, H = init_shape
+
+        pad_len = (self.BLOCKS_SIZE - (S % self.BLOCKS_SIZE)) % self.BLOCKS_SIZE
+        if pad_len > 0:
+            x = torch.nn.functional.pad(x, (0, 0, 0, pad_len), mode='constant', value=0)
+            S += pad_len  # Update S to reflect new shape
+        
         assert S % self.BLOCKS_SIZE == 0
         assert H % self.BLOCKS_SIZE == 0
         
+
         # GENERATE MASK MATRIX
         local_ids = self.adapter_ids.to('cpu').kron(
             torch.ones((S // self.BLOCKS_SIZE), dtype=int)
@@ -166,5 +173,12 @@ class MultiLoRALayerSTK(LoRALayer):
         Bx = stk.ops.sdd(x_prime, self.B, topo)
         result = stk.ops.dsd(Bx, self.A)
 
-        return result.view((B, S, self.out_features)) * self.scalings[self.adapter_ids.to('cpu')].view(-1, 1, 1)
+        # Undo the padding if needed before returning
+        result = result.view((B, S, self.out_features))
+        if pad_len > 0:
+            result = result[:, :-pad_len, :]
+
+        return result * self.scalings[self.adapter_ids.to('cpu')].view(-1, 1, 1)
+    
+    
 

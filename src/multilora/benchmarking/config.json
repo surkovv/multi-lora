@@ -1,0 +1,5 @@
+{
+    "use_stk": true,
+    "n_adapters": 24,
+    "batch_size": 26
+}
